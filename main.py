@@ -247,26 +247,35 @@ def lock_car():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
+        # 1. Authenticate and get the car ID
         refresh_and_sync()
         vehicle_id = get_vehicle_id()
 
+        # 2. Issue the mechanical lock command
         result = vehicle_manager.lock(vehicle_id)
 
-        return jsonify({
-            "status": "car_locked",
-            "result": result
-        }), 200
-
     except AuthenticationError as e:
+        # If it fails BEFORE locking, throw a real error alert
         return jsonify({
             "error": "Authentication failed",
             "details": str(e),
             "action": "Open Kia app and complete 2FA"
         }), 401
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+    # 3. Code only reaches here if the lock command above succeeded completely!
+    try:
+        # Run any post-lock cleanup here. If this fails, it is a false alarm.
+        pass 
+    except Exception:
+        # Quietly ignore any post-lock sync hiccups
+        pass
+
+    return jsonify({
+        "status": "success",
+        "result": result
+    }), 200
 
 # =========================
 # App Entry
