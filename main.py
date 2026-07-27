@@ -109,12 +109,24 @@ def auth_status():
 
     try:
         ensure_authenticated()
-        return jsonify({"status": "authenticated"}), 200
+
+        return jsonify({
+            "status": "authenticated"
+        }), 200
+
     except AuthenticationError as e:
         return jsonify({
             "status": "authentication_failed",
+            "error_type": type(e).__name__,
             "message": str(e)
         }), 401
+
+    except Exception as e:
+        return jsonify({
+            "status": "authentication_failed",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 500
 
 
 @app.route("/list_vehicles", methods=["GET"])
