@@ -285,30 +285,42 @@ def lock_car():
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
 
+    stage = "starting"
+
     try:
+        stage = "refreshing_vehicle_state"
         refresh_and_sync()
+
+        stage = "getting_vehicle_id"
         vehicle_id = get_vehicle_id()
 
+        stage = "sending_lock_command"
         result = vehicle_manager.lock(vehicle_id)
 
         return jsonify({
-            "status": "lock_command_sent",
+            "status": "lock_command_completed",
             "result": result
         }), 200
 
     except AuthenticationError as e:
         return jsonify({
             "status": "authentication_failed",
+            "stage": stage,
             "error_type": type(e).__name__,
             "message": str(e)
         }), 401
 
     except Exception as e:
         return jsonify({
-            "status": "lock_failed",
+            "status": "lock_result_unknown",
+            "stage": stage,
             "error_type": type(e).__name__,
-            "message": str(e)
-        }), 500
+            "message": str(e),
+            "note": (
+                "The Kia server may have accepted the lock command "
+                "even though the library reported an error."
+            )
+        }), 202
 
 @app.route("/vehicle_status", methods=["GET"])
 def vehicle_status():
