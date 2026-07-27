@@ -44,20 +44,13 @@ vehicle_manager = VehicleManager(
 def authorize_request():
     return request.headers.get("Authorization") == SECRET_KEY
 
-
 def ensure_authenticated():
-    """
-    Attempt to refresh Kia token.
-    Will fail if Kia requires OTP / captcha.
-    """
     try:
         vehicle_manager.check_and_refresh_token()
-    except AuthenticationError as e:
-        raise AuthenticationError(
-            "Kia authentication failed. "
-            "Open the Kia app and complete 2FA, then retry."
-        ) from e
-
+    except AuthenticationError:
+        raise
+    except Exception:
+        raise
 
 def refresh_and_sync():
     """
