@@ -268,6 +268,53 @@ def lock_car():
         "status": "success"
     }), 200
 
+@app.route("/vehicle_status", methods=["GET"])
+def vehicle_status():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        refresh_and_sync()
+        vehicle_id = get_vehicle_id()
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
+
+        return jsonify({
+            "status": "success",
+            "vehicle": {
+                "name": getattr(vehicle, "name", None),
+                "model": getattr(vehicle, "model", None),
+                "year": getattr(vehicle, "year", None),
+
+                # Likely useful state fields
+                "is_locked": getattr(vehicle, "is_locked", None),
+                "engine_is_running": getattr(
+                    vehicle, "engine_is_running", None
+                ),
+                "doors": getattr(vehicle, "doors", None),
+                "trunk_is_open": getattr(
+                    vehicle, "trunk_is_open", None
+                ),
+                "hood_is_open": getattr(
+                    vehicle, "hood_is_open", None
+                ),
+                "last_updated_at": str(
+                    getattr(vehicle, "last_updated_at", None)
+                )
+            }
+        }), 200
+
+    except AuthenticationError as e:
+        return jsonify({
+            "error": "Authentication failed",
+            "details": str(e),
+            "action": "Open Kia app and complete 2FA"
+        }), 401
+
+    except Exception as e:
+        return jsonify({
+            "error": "Unable to retrieve vehicle status",
+            "details": str(e)
+        }), 500
 # =========================
 # App Entry
 # =========================
