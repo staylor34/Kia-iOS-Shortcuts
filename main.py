@@ -253,6 +253,33 @@ def unlock_car():
         return jsonify({"error": str(e)}), 500
 
 
+# @app.route("/lock_car", methods=["POST"])
+# def lock_car():
+#     if not authorize_request():
+#         return jsonify({"error": "Unauthorized"}), 403
+
+#     try:
+#         refresh_and_sync()
+#         vehicle_id = get_vehicle_id()
+        
+        # Issue the mechanical lock command
+#         result = vehicle_manager.lock(vehicle_id)
+
+#     except AuthenticationError as e:
+#         return jsonify({
+#             "error": "Authentication failed",
+#             "details": str(e),
+#           "action": "Open Kia app and complete 2FA"
+#         }), 401
+#     except Exception as e:
+        # Catch any unpatched API library hiccups and verify it locked
+#         pass
+
+    # Force a clean JSON success string to your iPhone
+#     return jsonify({
+#         "status": "success"
+#     }), 200
+
 @app.route("/lock_car", methods=["POST"])
 def lock_car():
     if not authorize_request():
@@ -261,24 +288,27 @@ def lock_car():
     try:
         refresh_and_sync()
         vehicle_id = get_vehicle_id()
-        
-        # Issue the mechanical lock command
+
         result = vehicle_manager.lock(vehicle_id)
+
+        return jsonify({
+            "status": "lock_command_sent",
+            "result": result
+        }), 200
 
     except AuthenticationError as e:
         return jsonify({
-            "error": "Authentication failed",
-            "details": str(e),
-            "action": "Open Kia app and complete 2FA"
+            "status": "authentication_failed",
+            "error_type": type(e).__name__,
+            "message": str(e)
         }), 401
-    except Exception as e:
-        # Catch any unpatched API library hiccups and verify it locked
-        pass
 
-    # Force a clean JSON success string to your iPhone
-    return jsonify({
-        "status": "success"
-    }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "lock_failed",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 500
 
 @app.route("/vehicle_status", methods=["GET"])
 def vehicle_status():
