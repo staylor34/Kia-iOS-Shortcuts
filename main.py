@@ -2,7 +2,7 @@ import datetime as dt
 import os
 
 from flask import Flask, request, jsonify
-
+from requests.utils import dict_from_cookiejar, cookiejar_from_dict
 from hyundai_kia_connect_api import (
     VehicleManager,
     ClimateRequestOptions,
@@ -453,7 +453,10 @@ def otp_send():
                 "sms": login_result.sms,
                 "has_email": login_result.has_email,
                 "has_sms": login_result.has_sms,
-                "device_id": vehicle_manager.api.device_id
+                "device_id": vehicle_manager.api.device_id,
+                "session_cookies": dict_from_cookiejar(
+                    vehicle_manager.api.session.cookies
+                )
             }
         }), 200
 
@@ -477,6 +480,7 @@ def otp_verify():
         otp_key = str(data.get("otp_key", "")).strip()
         request_id = str(data.get("request_id", "")).strip()
         device_id = str(data.get("device_id", "")).strip()
+        session_cookies = data.get("session_cookies") or {}
 
         missing_fields = []
 
@@ -495,8 +499,19 @@ def otp_verify():
                 "missing": missing_fields
             }), 400
 
+        if not isinstance(session_cookies, dict):
+            return jsonify({
+                "status": "invalid_session_cookies",
+                "message": "session_cookies must be an object."
+            }), 400
+
         # Restore the same virtual Kia device used to request the OTP.
         vehicle_manager.api.device_id = device_id
+        
+        # Restore the HTTP session cookies from /otp/send.
+        vehicle_manager.api.session.cookies = cookiejar_from_dict(
+            session_cookies
+        )
 
         # Reconstruct the challenge in case this is a different
         # Vercel serverless instance.
