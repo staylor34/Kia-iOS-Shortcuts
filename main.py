@@ -66,6 +66,11 @@ vehicle_manager = VehicleManager(
     token=saved_token,
 )
 
+import hyundai_kia_connect_api
+
+print("Library version:", getattr(hyundai_kia_connect_api, "__version__", "unknown"))
+print("Library location:", hyundai_kia_connect_api.__file__)
+
 # =========================
 # Helper Functions
 # =========================
