@@ -1,5 +1,7 @@
 import datetime as dt
 import os
+import hyundai_kia_connect_api
+import inspect
 
 from flask import Flask, request, jsonify
 from requests.utils import dict_from_cookiejar, cookiejar_from_dict
@@ -551,6 +553,16 @@ def otp_verify():
             "error_type": type(e).__name__,
             "message": str(e)
         }), 500
+
+@app.route("/library_info", methods=["GET"])
+def library_info():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    return jsonify({
+        "version": getattr(hyundai_kia_connect_api, "__version__", "unknown"),
+        "location": inspect.getfile(hyundai_kia_connect_api),
+    })
 # =========================
 # App Entry
 # =========================
