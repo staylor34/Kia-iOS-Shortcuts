@@ -1,7 +1,19 @@
+import datetime as dt
 import os
+
 from flask import Flask, request, jsonify
-from hyundai_kia_connect_api import VehicleManager, ClimateRequestOptions
-from hyundai_kia_connect_api.exceptions import AuthenticationError
+
+from hyundai_kia_connect_api import (
+    VehicleManager,
+    ClimateRequestOptions,
+    Token,
+)
+from hyundai_kia_connect_api.ApiImpl import OTPRequest
+from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
+from hyundai_kia_connect_api.exceptions import (
+    AuthenticationError,
+    AuthenticationOTPRequired,
+)
 
 app = Flask(__name__)
 
@@ -13,6 +25,8 @@ PASSWORD = os.environ.get("KIA_PASSWORD")
 PIN = os.environ.get("KIA_PIN")
 SECRET_KEY = os.environ.get("SECRET_KEY")
 VEHICLE_ID = os.environ.get("VEHICLE_ID")  # Optional
+KIA_REFRESH_TOKEN = os.environ.get("KIA_REFRESH_TOKEN")
+KIA_DEVICE_ID = os.environ.get("KIA_DEVICE_ID")
 
 missing = []
 if not USERNAME:
@@ -30,12 +44,26 @@ if missing:
 # =========================
 # Vehicle Manager
 # =========================
+saved_token = None
+
+if KIA_REFRESH_TOKEN and KIA_DEVICE_ID:
+    saved_token = Token(
+        username=USERNAME,
+        password=PASSWORD,
+        access_token="",
+        refresh_token=KIA_REFRESH_TOKEN,
+        device_id=KIA_DEVICE_ID,
+        valid_until=dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+        pin=str(PIN),
+    )
+
 vehicle_manager = VehicleManager(
-    region=3,  # North America
-    brand=1,   # KIA
+    region=3,  # USA
+    brand=1,   # Kia
     username=USERNAME,
     password=PASSWORD,
-    pin=str(PIN)
+    pin=str(PIN),
+    token=saved_token,
 )
 
 # =========================
@@ -361,6 +389,147 @@ def vehicle_status():
         return jsonify({
             "error": "Unable to retrieve vehicle status",
             "details": str(e)
+        }), 500
+
+@app.route("/otp/send", methods=["POST"])
+def otp_send():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        data = request.get_json(silent=True) or {}
+        requested_method = str(data.get("method", "email")).lower()
+
+        # Start a fresh login. If OTP is required, VehicleManager stores
+        # the OTPRequest in vehicle_manager.otp_request.
+        login_result = vehicle_manager.login()
+
+        if login_result is True:
+            return jsonify({
+                "status": "already_authenticated"
+            }), 200
+
+        if not isinstance(login_result, OTPRequest):
+            return jsonify({
+                "status": "unexpected_login_result",
+                "result_type": type(login_result).__name__
+            }), 500
+
+        if requested_method == "email":
+            if not login_result.has_email:
+                return jsonify({
+                    "status": "email_unavailable",
+                    "message": "Kia did not offer email as an OTP destination."
+                }), 400
+
+            notify_type = OTP_NOTIFY_TYPE.EMAIL
+
+        elif requested_method in ("sms", "phone"):
+            if not login_result.has_sms:
+                return jsonify({
+                    "status": "sms_unavailable",
+                    "message": "Kia did not offer SMS as an OTP destination."
+                }), 400
+
+            notify_type = OTP_NOTIFY_TYPE.SMS
+
+        else:
+            return jsonify({
+                "status": "invalid_method",
+                "message": "Use 'email' or 'sms'."
+            }), 400
+
+        vehicle_manager.send_otp(notify_type)
+
+        # Return enough information to reconstruct the OTP challenge
+        # if Vercel sends the verification request to another instance.
+        return jsonify({
+            "status": "otp_sent",
+            "method": requested_method,
+            "challenge": {
+                "otp_key": login_result.otp_key,
+                "request_id": login_result.request_id,
+                "email": login_result.email,
+                "sms": login_result.sms,
+                "has_email": login_result.has_email,
+                "has_sms": login_result.has_sms,
+                "device_id": vehicle_manager.api.device_id
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "otp_send_failed",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 500
+
+
+@app.route("/otp/verify", methods=["POST"])
+def otp_verify():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        data = request.get_json(silent=True) or {}
+
+        otp_code = str(data.get("otp_code", "")).strip()
+        otp_key = str(data.get("otp_key", "")).strip()
+        request_id = str(data.get("request_id", "")).strip()
+        device_id = str(data.get("device_id", "")).strip()
+
+        missing_fields = []
+
+        if not otp_code:
+            missing_fields.append("otp_code")
+        if not otp_key:
+            missing_fields.append("otp_key")
+        if not request_id:
+            missing_fields.append("request_id")
+        if not device_id:
+            missing_fields.append("device_id")
+
+        if missing_fields:
+            return jsonify({
+                "status": "missing_fields",
+                "missing": missing_fields
+            }), 400
+
+        # Restore the same virtual Kia device used to request the OTP.
+        vehicle_manager.api.device_id = device_id
+
+        # Reconstruct the challenge in case this is a different
+        # Vercel serverless instance.
+        vehicle_manager.otp_request = OTPRequest(
+            otp_key=otp_key,
+            request_id=request_id,
+            email=None,
+            sms=None,
+            has_email=True,
+            has_sms=True,
+        )
+
+        vehicle_manager.verify_otp_and_complete_login(otp_code)
+
+        token = vehicle_manager.token
+
+        return jsonify({
+            "status": "otp_verified",
+            "message": (
+                "Save refresh_token and device_id as private Vercel "
+                "environment variables, then redeploy."
+            ),
+            "vercel_environment_variables": {
+                "KIA_REFRESH_TOKEN": token.refresh_token,
+                "KIA_DEVICE_ID": token.device_id
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "otp_verification_failed",
+            "error_type": type(e).__name__,
+            "message": str(e)
         }), 500
 # =========================
 # App Entry
