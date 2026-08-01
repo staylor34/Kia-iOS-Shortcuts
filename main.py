@@ -392,6 +392,75 @@ def vehicle_status():
             "details": str(e)
         }), 500
 
+@app.route("/auto_lock", methods=["POST"])
+def auto_lock():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    stage = "starting"
+
+    try:
+        stage = "refreshing_vehicle_state"
+        refresh_and_sync()
+
+        stage = "getting_vehicle"
+        vehicle_id = get_vehicle_id()
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
+
+        engine_is_running = bool(
+            getattr(vehicle, "engine_is_running", False)
+        )
+        is_locked = bool(
+            getattr(vehicle, "is_locked", False)
+        )
+
+        if engine_is_running:
+            return jsonify({
+                "status": "success",
+                "action": "not_locked",
+                "reason": "engine_running",
+                "engine_is_running": True,
+                "is_locked": is_locked
+            }), 200
+
+        if is_locked:
+            return jsonify({
+                "status": "success",
+                "action": "not_locked",
+                "reason": "already_locked",
+                "engine_is_running": False,
+                "is_locked": True
+            }), 200
+
+        stage = "sending_lock_command"
+        result = vehicle_manager.lock(vehicle_id)
+
+        return jsonify({
+            "status": "success",
+            "action": "lock_command_sent",
+            "reason": "vehicle_was_off_and_unlocked",
+            "engine_is_running": False,
+            "is_locked_before_command": False,
+            "result": result
+        }), 200
+
+    except AuthenticationError as e:
+        return jsonify({
+            "status": "authentication_failed",
+            "action": "not_locked",
+            "stage": stage,
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 401
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "action": "lock_result_unknown",
+            "stage": stage,
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 202
 # =========================
 # App Entry
 # =========================
