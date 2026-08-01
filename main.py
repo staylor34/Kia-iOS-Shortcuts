@@ -395,11 +395,16 @@ def vehicle_status():
 @app.route("/auto_lock", methods=["POST"])
 def auto_lock():
     if not authorize_request():
-        return jsonify({"error": "Unauthorized"}), 403
+        return jsonify({
+            "status": "error",
+            "action": "not_authorized",
+            "message": "Authorization failed."
+        }), 403
 
     stage = "starting"
 
     try:
+        # Get the latest available vehicle state from Kia.
         stage = "refreshing_vehicle_state"
         refresh_and_sync()
 
@@ -413,54 +418,83 @@ def auto_lock():
         is_locked = bool(
             getattr(vehicle, "is_locked", False)
         )
+        last_updated_at = str(
+            getattr(vehicle, "last_updated_at", None)
+        )
 
+        # Do nothing if the EV9 is still running.
         if engine_is_running:
             return jsonify({
                 "status": "success",
-                "action": "not_locked",
+                "action": "skipped",
                 "reason": "engine_running",
-                "engine_is_running": True,
-                "is_locked": is_locked
+                "message": "EV9 was not locked because it is still running.",
+                "vehicle": {
+                    "engine_is_running": True,
+                    "is_locked": is_locked,
+                    "last_updated_at": last_updated_at
+                }
             }), 200
 
+        # Do nothing if the EV9 is already locked.
         if is_locked:
             return jsonify({
                 "status": "success",
-                "action": "not_locked",
+                "action": "skipped",
                 "reason": "already_locked",
-                "engine_is_running": False,
-                "is_locked": True
+                "message": "EV9 was already locked.",
+                "vehicle": {
+                    "engine_is_running": False,
+                    "is_locked": True,
+                    "last_updated_at": last_updated_at
+                }
             }), 200
 
+        # Vehicle is off and unlocked, so send the lock command.
         stage = "sending_lock_command"
         result = vehicle_manager.lock(vehicle_id)
 
         return jsonify({
             "status": "success",
             "action": "lock_command_sent",
-            "reason": "vehicle_was_off_and_unlocked",
-            "engine_is_running": False,
-            "is_locked_before_command": False,
+            "reason": "vehicle_off_and_unlocked",
+            "message": "Lock command was sent to the EV9.",
+            "vehicle_before_command": {
+                "engine_is_running": False,
+                "is_locked": False,
+                "last_updated_at": last_updated_at
+            },
+            # The lock command is asynchronous, so this does not claim
+            # that the vehicle has already confirmed the new state.
+            "lock_confirmation": "pending",
             "result": result
         }), 200
 
     except AuthenticationError as e:
         return jsonify({
-            "status": "authentication_failed",
+            "status": "error",
             "action": "not_locked",
+            "reason": "authentication_failed",
+            "message": "Kia authentication failed.",
             "stage": stage,
             "error_type": type(e).__name__,
-            "message": str(e)
+            "details": str(e)
         }), 401
 
     except Exception as e:
         return jsonify({
-            "status": "error",
+            "status": "warning",
             "action": "lock_result_unknown",
+            "reason": "kia_command_error",
+            "message": (
+                "The lock result could not be confirmed. "
+                "Kia may still have accepted the command."
+            ),
             "stage": stage,
             "error_type": type(e).__name__,
-            "message": str(e)
+            "details": str(e)
         }), 202
+        
 # =========================
 # App Entry
 # =========================
