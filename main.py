@@ -481,7 +481,7 @@ def auto_lock():
             "stage": stage,
             "error_type": type(e).__name__,
             "details": str(e),
-            "next_step": "Run /kia/otp/start, /kia/otp/send, and /kia/otp/verify."
+            "next_step": "Run /otp_start, /otp_send, and /otp_verify."
         }), 401
         
     except AuthenticationError as e:
