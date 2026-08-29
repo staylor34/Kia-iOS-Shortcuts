@@ -2,6 +2,8 @@ import datetime as dt
 import os
 import hyundai_kia_connect_api
 import inspect
+from hyundai_kia_connect_api.ApiImpl import OTPRequest
+from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
 
 from flask import Flask, request, jsonify
 from hyundai_kia_connect_api import (
@@ -470,6 +472,18 @@ def auto_lock():
             "result": result
         }), 200
 
+    except AuthenticationOTPRequired as e:
+        return jsonify({
+            "status": "error",
+            "action": "not_locked",
+            "reason": "otp_required",
+            "message": "Kia authentication requires OTP.",
+            "stage": stage,
+            "error_type": type(e).__name__,
+            "details": str(e),
+            "next_step": "Run /kia/otp/start, /kia/otp/send, and /kia/otp/verify."
+        }), 401
+        
     except AuthenticationError as e:
         return jsonify({
             "status": "error",
@@ -494,7 +508,112 @@ def auto_lock():
             "error_type": type(e).__name__,
             "details": str(e)
         }), 202
-        
+
+@app.route("/kia/otp/start", methods=["POST"])
+def kia_otp_start():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        result = vehicle_manager.login()
+
+        if result is True:
+            token = vehicle_manager.token
+
+            return jsonify({
+                "status": "authenticated",
+                "otp_required": False,
+                "refresh_token": token.refresh_token,
+                "device_id": token.device_id,
+                "valid_until": str(token.valid_until)
+            }), 200
+
+        if isinstance(result, OTPRequest):
+            return jsonify({
+                "status": "otp_required",
+                "otp_required": True,
+                "has_email": result.has_email,
+                "has_sms": result.has_sms,
+                "email": result.email,
+                "sms": result.sms,
+                "request_id": result.request_id
+            }), 200
+
+        return jsonify({
+            "status": "error",
+            "message": "Unexpected login result."
+        }), 500
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 500
+
+
+@app.route("/kia/otp/send", methods=["POST"])
+def kia_otp_send():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        data = request.get_json(silent=True) or {}
+        method = str(data.get("method", "email")).lower()
+
+        if method == "sms":
+            notify_type = OTP_NOTIFY_TYPE.SMS
+        else:
+            notify_type = OTP_NOTIFY_TYPE.EMAIL
+
+        vehicle_manager.send_otp(notify_type)
+
+        return jsonify({
+            "status": "success",
+            "message": f"OTP sent by {method}."
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 500
+
+
+@app.route("/kia/otp/verify", methods=["POST"])
+def kia_otp_verify():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        data = request.get_json(silent=True) or {}
+        otp_code = str(data.get("otp", "")).strip()
+
+        if not otp_code:
+            return jsonify({
+                "status": "error",
+                "message": "Missing OTP code."
+            }), 400
+
+        vehicle_manager.verify_otp_and_complete_login(otp_code)
+
+        token = vehicle_manager.token
+
+        return jsonify({
+            "status": "success",
+            "message": "OTP verified and Kia login completed.",
+            "refresh_token": token.refresh_token,
+            "device_id": token.device_id,
+            "valid_until": str(token.valid_until)
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }), 500
 # =========================
 # App Entry
 # =========================
