@@ -509,7 +509,7 @@ def auto_lock():
             "details": str(e)
         }), 202
 
-@app.route("/kia/otp/start", methods=["POST"])
+@app.route("/otp_start", methods=["POST"])
 def kia_otp_start():
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
@@ -552,7 +552,7 @@ def kia_otp_start():
         }), 500
 
 
-@app.route("/kia/otp/send", methods=["POST"])
+@app.route("/otp_send", methods=["POST"])
 def kia_otp_send():
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
@@ -581,7 +581,7 @@ def kia_otp_send():
         }), 500
 
 
-@app.route("/kia/otp/verify", methods=["POST"])
+@app.route("/otp_verify", methods=["POST"])
 def kia_otp_verify():
     if not authorize_request():
         return jsonify({"error": "Unauthorized"}), 403
