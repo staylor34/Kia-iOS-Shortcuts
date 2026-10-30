@@ -3,6 +3,8 @@ import os
 import hyundai_kia_connect_api
 import inspect
 import json
+import time
+import uuid
 from upstash_redis import Redis
 from hyundai_kia_connect_api.ApiImpl import OTPRequest
 from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
@@ -115,12 +117,101 @@ def authorize_request():
     return request.headers.get("Authorization") == SECRET_KEY
 
 def ensure_authenticated():
+    if redis_client is None:
+        raise RuntimeError("Redis is unavailable")
+
+    credentials_key = "kia:auth:credentials"
+    lock_key = "kia:auth:refresh_lock"
+    lock_id = str(uuid.uuid4())
+
+    # Prevent concurrent Vercel instances from refreshing
+    # the same Kia credentials.
+    acquired = False
+
+    for attempt in range(10):
+        acquired = bool(
+            redis_client.set(lock_key, lock_id, nx=True, ex=120)
+        )
+        if acquired:
+            break
+        time.sleep(0.5)
+
+    if not acquired:
+        raise RuntimeError("Kia authentication refresh is busy")
+
     try:
+        stored = redis_client.get(credentials_key)
+
+        if isinstance(stored, str):
+            stored = json.loads(stored)
+
+        if not isinstance(stored, dict):
+            raise RuntimeError("Invalid Kia credentials in Redis")
+
+        refresh_token = stored.get("refresh_token")
+        device_id = stored.get("device_id")
+
+        if not refresh_token or not device_id:
+            raise RuntimeError("Incomplete Kia credentials in Redis")
+
+        # Reload the latest saved credentials, even if this
+        # Vercel instance was initialized earlier.
+        current_token = vehicle_manager.token
+
+        if (
+            current_token is None
+            or current_token.refresh_token != refresh_token
+            or current_token.device_id != device_id
+        ):
+            vehicle_manager.token = Token(
+                username=USERNAME,
+                password=PASSWORD,
+                access_token="",
+                refresh_token=refresh_token,
+                device_id=device_id,
+                valid_until=dt.datetime.min.replace(
+                    tzinfo=dt.timezone.utc
+                ),
+                pin=str(PIN),
+            )
+            vehicle_manager.vehicles = {}
+
+        # Authenticate using the newest saved credentials.
         vehicle_manager.check_and_refresh_token()
-    except AuthenticationError:
-        raise
-    except Exception:
-        raise
+
+        updated = vehicle_manager.token
+
+        if not updated or not updated.refresh_token or not updated.device_id:
+            raise RuntimeError("Kia returned incomplete credentials")
+
+        # Save credentials if Kia rotated them.
+        if (
+            updated.refresh_token != refresh_token
+            or updated.device_id != device_id
+        ):
+            redis_client.set(
+                credentials_key,
+                {
+                    "refresh_token": updated.refresh_token,
+                    "device_id": updated.device_id
+                }
+            )
+            print("Kia authentication credentials updated in Redis")
+
+    finally:
+        # Release only the lock owned by this request.
+        # Never delete another instance's lock.
+        redis_client.eval(
+            """
+            if redis.call("GET", KEYS[1]) == ARGV[1] then
+                return redis.call("DEL", KEYS[1])
+            end
+            return 0
+            """,
+            keys=[lock_key],
+            args=[lock_id]
+        )
+
 
 def refresh_and_sync():
     """
