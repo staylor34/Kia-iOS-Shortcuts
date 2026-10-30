@@ -654,6 +654,54 @@ def redis_status():
             "status": "error",
             "message": "Redis connection failed"
         }), 503
+
+@app.route("/redis_initialize", methods=["POST"])
+def redis_initialize():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if redis_client is None:
+        return jsonify({
+            "status": "error",
+            "message": "Redis is not configured"
+        }), 503
+
+    if not KIA_REFRESH_TOKEN or not KIA_DEVICE_ID:
+        return jsonify({
+            "status": "error",
+            "message": "Kia environment credentials are missing"
+        }), 503
+
+    try:
+        credentials = {
+            "refresh_token": KIA_REFRESH_TOKEN,
+            "device_id": KIA_DEVICE_ID
+        }
+
+        # Only initialize if Redis has no saved Kia credentials.
+        # Never overwrite a newer stored token.
+        created = redis_client.set(
+            "kia:auth:credentials",
+            credentials,
+            nx=True
+        )
+
+        return jsonify({
+            "status": "success",
+            "action": "initialized" if created else "already_exists",
+            "message": (
+                "Kia credentials are stored in Redis."
+                if created else
+                "Existing Redis credentials were preserved."
+            )
+        }), 200
+
+    except Exception:
+        return jsonify({
+            "status": "error",
+            "message": "Unable to initialize Redis credentials"
+        }), 503
+
 # =========================
 # App Entry
 # =========================
