@@ -638,6 +638,22 @@ def kia_otp_verify():
         vehicle_manager.verify_otp_and_complete_login(otp_code)
 
         token = vehicle_manager.token
+        
+        # Save newly authenticated credentials in Redis.
+        # Do not report success if persistence fails.
+        if redis_client is None:
+            raise RuntimeError("Redis is unavailable")
+
+        if not token.refresh_token or not token.device_id:
+            raise RuntimeError("Kia returned incomplete credentials")
+
+        redis_client.set(
+            "kia:auth:credentials",
+            {
+                "refresh_token": token.refresh_token,
+                "device_id": token.device_id
+            }
+        )
 
         return jsonify({
             "status": "success",
