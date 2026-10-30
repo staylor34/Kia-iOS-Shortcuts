@@ -2,6 +2,7 @@ import datetime as dt
 import os
 import hyundai_kia_connect_api
 import inspect
+import json
 from upstash_redis import Redis
 from hyundai_kia_connect_api.ApiImpl import OTPRequest
 from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
@@ -717,18 +718,24 @@ def redis_auth_status():
     try:
         stored = redis_client.get("kia:auth:credentials")
 
+        # Upstash returns JSON-serialized dictionaries as strings.
+        if isinstance(stored, str):
+            stored = json.loads(stored)
+
         if not isinstance(stored, dict):
             return jsonify({
                 "status": "error",
                 "message": "Redis credentials missing or invalid"
             }), 503
 
+        credentials_found = bool(
+            stored.get("refresh_token")
+            and stored.get("device_id")
+        )
+
         return jsonify({
             "status": "success",
-            "credentials_found": bool(
-                stored.get("refresh_token")
-                and stored.get("device_id")
-            ),
+            "credentials_found": credentials_found,
             "matches_vercel": (
                 stored.get("refresh_token") == KIA_REFRESH_TOKEN
                 and stored.get("device_id") == KIA_DEVICE_ID
@@ -740,6 +747,7 @@ def redis_auth_status():
             "status": "error",
             "message": "Unable to read Redis credentials"
         }), 503
+
 
 
 # =========================
