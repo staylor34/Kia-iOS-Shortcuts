@@ -2,6 +2,7 @@ import datetime as dt
 import os
 import hyundai_kia_connect_api
 import inspect
+from upstash_redis import Redis
 from hyundai_kia_connect_api.ApiImpl import OTPRequest
 from hyundai_kia_connect_api.const import OTP_NOTIFY_TYPE
 
@@ -41,6 +42,20 @@ if not SECRET_KEY:
 
 if missing:
     raise ValueError(f"Missing environment variables: {', '.join(missing)}")
+
+# =========================
+# Redis Connection
+# =========================
+REDIS_URL = os.environ.get("KV_REST_API_URL")
+REDIS_TOKEN = os.environ.get("KV_REST_API_TOKEN")
+
+redis_client = None
+
+if REDIS_URL and REDIS_TOKEN:
+    redis_client = Redis(
+        url=REDIS_URL,
+        token=REDIS_TOKEN
+    )
 
 # =========================
 # Vehicle Manager
@@ -614,6 +629,31 @@ def kia_otp_verify():
             "error_type": type(e).__name__,
             "message": str(e)
         }), 500
+
+
+@app.route("/redis_status", methods=["GET"])
+def redis_status():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if redis_client is None:
+        return jsonify({
+            "status": "error",
+            "message": "Redis environment variables missing"
+        }), 503
+
+    try:
+        result = redis_client.ping()
+        return jsonify({
+            "status": "success",
+            "redis": result
+        }), 200
+
+    except Exception:
+        return jsonify({
+            "status": "error",
+            "message": "Redis connection failed"
+        }), 503
 # =========================
 # App Entry
 # =========================
