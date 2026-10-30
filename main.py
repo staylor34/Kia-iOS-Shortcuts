@@ -59,20 +59,43 @@ if REDIS_URL and REDIS_TOKEN:
     )
 
 # =========================
-# Vehicle Manager
+# Load Kia Credentials
 # =========================
 saved_token = None
 
-if KIA_REFRESH_TOKEN and KIA_DEVICE_ID:
+if redis_client is None:
+    raise RuntimeError("Redis must be configured for Kia authentication")
+
+try:
+    stored = redis_client.get("kia:auth:credentials")
+
+    if isinstance(stored, str):
+        stored = json.loads(stored)
+
+    if not isinstance(stored, dict):
+        raise RuntimeError("Kia credentials missing from Redis")
+
+    refresh_token = stored.get("refresh_token")
+    device_id = stored.get("device_id")
+
+    if not refresh_token or not device_id:
+        raise RuntimeError("Incomplete Kia credentials in Redis")
+
     saved_token = Token(
         username=USERNAME,
         password=PASSWORD,
         access_token="",
-        refresh_token=KIA_REFRESH_TOKEN,
-        device_id=KIA_DEVICE_ID,
+        refresh_token=refresh_token,
+        device_id=device_id,
         valid_until=dt.datetime.min.replace(tzinfo=dt.timezone.utc),
         pin=str(PIN),
     )
+
+except Exception as e:
+    raise RuntimeError(
+        "Unable to load Kia authentication credentials from Redis"
+    ) from e
+
 
 vehicle_manager = VehicleManager(
     region=3,  # USA
