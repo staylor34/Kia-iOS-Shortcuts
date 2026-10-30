@@ -702,6 +702,46 @@ def redis_initialize():
             "message": "Unable to initialize Redis credentials"
         }), 503
 
+
+@app.route("/redis_auth_status", methods=["GET"])
+def redis_auth_status():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if redis_client is None:
+        return jsonify({
+            "status": "error",
+            "message": "Redis is unavailable"
+        }), 503
+
+    try:
+        stored = redis_client.get("kia:auth:credentials")
+
+        if not isinstance(stored, dict):
+            return jsonify({
+                "status": "error",
+                "message": "Redis credentials missing or invalid"
+            }), 503
+
+        return jsonify({
+            "status": "success",
+            "credentials_found": bool(
+                stored.get("refresh_token")
+                and stored.get("device_id")
+            ),
+            "matches_vercel": (
+                stored.get("refresh_token") == KIA_REFRESH_TOKEN
+                and stored.get("device_id") == KIA_DEVICE_ID
+            )
+        }), 200
+
+    except Exception:
+        return jsonify({
+            "status": "error",
+            "message": "Unable to read Redis credentials"
+        }), 503
+
+
 # =========================
 # App Entry
 # =========================
