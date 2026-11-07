@@ -833,6 +833,66 @@ def redis_auth_status():
 
 
 
+@app.route("/force_vehicle_refresh", methods=["POST"])
+def force_vehicle_refresh():
+    if not authorize_request():
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if redis_client is None:
+        return jsonify({
+            "status": "error",
+            "message": "Redis unavailable"
+        }), 503
+
+    try:
+        # Limit forced refreshes to once every 5 minutes.
+        allowed = redis_client.set(
+            "kia:diagnostics:force_refresh_cooldown",
+            "1",
+            nx=True,
+            ex=300
+        )
+
+        if not allowed:
+            return jsonify({
+                "status": "rate_limited",
+                "message": "Try again after 5 minutes."
+            }), 429
+
+        refresh_and_sync()
+        vehicle_id = get_vehicle_id()
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
+
+        before = {
+            "engine_is_running": vehicle.engine_is_running,
+            "is_locked": vehicle.is_locked,
+            "last_updated_at": str(vehicle.last_updated_at)
+        }
+
+        vehicle_manager.force_refresh_vehicle_state(vehicle_id)
+
+        # Re-read the cached state after requesting refresh.
+        vehicle_manager.update_vehicle_with_cached_state(vehicle_id)
+        vehicle = vehicle_manager.get_vehicle(vehicle_id)
+
+        return jsonify({
+            "status": "success",
+            "message": "Forced refresh request completed.",
+            "before": before,
+            "after": {
+                "engine_is_running": vehicle.engine_is_running,
+                "is_locked": vehicle.is_locked,
+                "last_updated_at": str(vehicle.last_updated_at)
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error_type": type(e).__name__,
+            "message": "Forced vehicle refresh failed."
+        }), 500
+
 # =========================
 # App Entry
 # =========================
